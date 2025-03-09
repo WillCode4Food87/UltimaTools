@@ -1,40 +1,79 @@
 ﻿using FileParser.Models;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 
-namespace FileParser.Parser
+namespace FileParser.Services.Parse
 {
-    public class BaseCreatureParser : ICreatureParser
+    public class BaseCreatureParser : IParser<CreatureData>
     {
-        public CreatureData? Parse(string filePath)
+        public List<CreatureData> Parse(IEnumerable<string> filePaths)
         {
-            Console.WriteLine($"Parsing file: {filePath}");
-            if (!filePath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+            List<CreatureData> creatures = [];
+
+            foreach (var filePath in filePaths)
             {
-                Console.WriteLine($"Skipping non-CS file: {filePath}");
-                return null;
+                string content = File.ReadAllText(filePath);
+                SyntaxTree tree = CSharpSyntaxTree.ParseText(content);
+                var root = tree.GetRoot();
+
+                var validClasses = root.DescendantNodes()
+                    .OfType<ClassDeclarationSyntax>()
+                    .Where(DirectlyInheritsBaseCreature)
+                    .ToList();
+
+                foreach (var classDeclaration in validClasses)
+                {
+                    CreatureData data = MapCreature(filePath, root, classDeclaration);
+                    creatures.Add(data);
+                }
             }
 
+            return creatures;
+        }
 
-            string content = File.ReadAllText(filePath);
-            SyntaxTree tree = CSharpSyntaxTree.ParseText(content);
-            var root = tree.GetRoot();
+        bool DirectlyInheritsBaseCreature(ClassDeclarationSyntax classDecl)
+        {
+            if (classDecl.BaseList == null || classDecl.BaseList.Types.Count == 0)
+                return false;
 
-            var classDeclaration = root.DescendantNodes()
-                                       .OfType<ClassDeclarationSyntax>()
-                                       .FirstOrDefault(c => c.BaseList?.Types.Any(t => t.ToString().Contains("BaseCreature")) == true);
+            // Only check the FIRST base type
+            var firstBaseType = classDecl.BaseList.Types.First().Type.ToString();
 
-            if (classDeclaration == null)
-                return null;
+            // Base classes that are still "containers" and not true creatures should be ignored
+            var excludedBaseClasses = new HashSet<string> { "BaseMount", "BaseNPC", "BasePerson", "BaseVendor", "BaseFamiliar" };
 
-            CreatureData data = new CreatureData
+            return (firstBaseType == "BaseCreature" || firstBaseType == "Server.Mobiles.BaseCreature")
+                   && !excludedBaseClasses.Contains(classDecl.Identifier.Text);
+        }
+
+
+        private static CreatureData MapCreature(string filePath, SyntaxNode root, ClassDeclarationSyntax classDeclaration)
+        {
+            CreatureData data = new()
             {
                 ClassName = classDeclaration.Identifier.Text,
                 FilePath = filePath,
                 FolderGroup = Path.GetDirectoryName(filePath)
             };
 
+            SetBaseParamValueProperties(classDeclaration, data);
+
+            SetStandardAssignedProperties(root, data);
+
+            SetStats(root, data);
+
+            SetDamage(root, data);
+
+            SetResists(root, data);
+
+            SetFavoriteFoods(root, classDeclaration, data);
+
+            return data;
+        }
+
+        private static void SetBaseParamValueProperties(ClassDeclarationSyntax classDeclaration, CreatureData data)
+        {
             // Find the constructor and check if it calls base()
             var constructor = classDeclaration.DescendantNodes()
                                               .OfType<ConstructorDeclarationSyntax>()
@@ -50,25 +89,12 @@ namespace FileParser.Parser
                     data.FightMode = ParseEnum<FightMode>(baseArgs[1]);
 
                     // Parse numeric values
-                    data.iRangePerception = ParseInt(baseArgs[2]);
-                    data.iRangeFight = ParseInt(baseArgs[3]);
-                    data.dActiveSpeed = ParseDouble(baseArgs[4]);
-                    data.dPassiveSpeed = ParseDouble(baseArgs[5]);
+                    data.IRangePerception = ParseInt(baseArgs[2]);
+                    data.IRangeFight = ParseInt(baseArgs[3]);
+                    data.DActiveSpeed = ParseDouble(baseArgs[4]);
+                    data.DPassiveSpeed = ParseDouble(baseArgs[5]);
                 }
             }
-
-            // Extract other properties
-            SetStandardAssignedProperties(root, data);
-
-            SetStats(root, data);
-
-            SetDamage(root, data);
-
-            SetResists(root, data);
-
-            SetFavoriteFoods(root, classDeclaration, data);
-
-            return data;
         }
 
         private static void SetStandardAssignedProperties(SyntaxNode root, CreatureData data)
@@ -83,7 +109,7 @@ namespace FileParser.Parser
                 else if (left.Contains("Fame")) data.Fame = ParseInt(right);
                 else if (left.Contains("Karma")) data.Karma = ParseInt(right);
                 else if (left.Contains("VirtualArmor")) data.VirtualArmor = ParseInt(right);
-                else if (left.Contains("Tamable")) data.Tamable = right.Trim().ToLower() == "true";
+                else if (left.Contains("Tamable")) data.Tamable = right.Trim().Equals("true", StringComparison.CurrentCultureIgnoreCase);
             }
         }
 
@@ -95,6 +121,7 @@ namespace FileParser.Parser
                 data.SkillsMax[skill] = 0.0;
 
             }
+
             // Extract `SetSkill(SkillName.X, min, max)`
             foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
             {
@@ -114,6 +141,7 @@ namespace FileParser.Parser
                     }
                     else
                     {
+                        // Todo Investigate this occurence
                         Console.WriteLine($"Warning: Unknown SkillName '{skillType}'");
                     }
                 }
@@ -264,7 +292,7 @@ namespace FileParser.Parser
             if (string.IsNullOrEmpty(value))
                 return "None";
 
-            List<string> foodList = new List<string>();
+            List<string> foodList = [];
 
             // Remove "FoodType." prefixes and split multiple values
             var foodParts = value.Replace("FoodType.", "").Split('|', StringSplitOptions.RemoveEmptyEntries);

@@ -10,10 +10,10 @@ namespace FileParser.Models
         // Base Constructor Parameters
         public AIType? AIType { get; set; }
         public FightMode? FightMode { get; set; }
-        public int? iRangePerception { get; set; }
-        public int? iRangeFight { get; set; }
-        public double? dActiveSpeed { get; set; }
-        public double? dPassiveSpeed { get; set; }
+        public int? IRangePerception { get; set; }
+        public int? IRangeFight { get; set; }
+        public double? DActiveSpeed { get; set; }
+        public double? DPassiveSpeed { get; set; }
 
         // Enum properties (single-value)
         public HideType? HideType { get; set; }
@@ -61,8 +61,8 @@ namespace FileParser.Models
         public int ResistPoisonMax { get; set; } = 0;
         public int ResistEnergyMin { get; set; } = 0;
         public int ResistEnergyMax { get; set; } = 0;
-        public Dictionary<SkillName, double> SkillsMin { get; set; } = new();
-        public Dictionary<SkillName, double> SkillsMax { get; set; } = new();
+        public Dictionary<SkillName, double> SkillsMin { get; set; } = [];
+        public Dictionary<SkillName, double> SkillsMax { get; set; } = [];
 
         // Flag indicating additional complexity that may require special handling (Currently removed)
         public bool IsComplex { get; set; } = false;

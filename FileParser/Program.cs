@@ -1,13 +1,19 @@
-﻿using FileParser.Exporter;
-using FileParser.Models;
-using FileParser.Parser;
+﻿using FileParser.Models;
+using FileParser.Services.Export;
+using FileParser.Services.Parse;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace FileParser
 {
     class Program
     {
-        static void Main(string[] args)
+        static void Main()
         {
+            var serviceProvider = new ServiceCollection()
+           .AddSingleton(typeof(IExporter<>), typeof(CsvExporter<>))
+           .AddSingleton(typeof(IParser<CreatureData>), typeof(BaseCreatureParser))
+           .BuildServiceProvider();
+
             string binDirectory = AppDomain.CurrentDomain.BaseDirectory;
 
             string solutionDirectory = Path.GetFullPath(Path.Combine(binDirectory, @"..\..\..\.."));
@@ -15,7 +21,7 @@ namespace FileParser
             // This can target any mobiles directory, It is currently set to target this 
             string baseDirectory = Path.Combine(solutionDirectory, @"Scripts\Mobiles");
 
-            string outputCsv = Path.Combine(solutionDirectory, "CreatureData.csv");
+            string outputPath = Path.Combine(solutionDirectory, "CreatureData.csv");
 
             if (!Directory.Exists(baseDirectory))
             {
@@ -23,32 +29,22 @@ namespace FileParser
                 return;
             }
 
-            if (File.Exists(outputCsv))
+            if (File.Exists(outputPath))
             {
-                File.Delete(outputCsv);
+                File.Delete(outputPath);
             }
-
-            List<CreatureData> creatures = new List<CreatureData>();
 
             // Scan for all .cs files if directory exists
             var csFiles = Directory.GetFiles(baseDirectory, "*.cs", SearchOption.AllDirectories)
                         .Where(file => file.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
                         .ToArray();
-            ICreatureParser parser = new BaseCreatureParser();
 
-            foreach (var file in csFiles)
-            {
-                CreatureData? data = parser.Parse(file);
-                if (data != null)
-                {
-                    // Set FolderGroup relative to the base directory.
-                    data.FolderGroup = Path.GetDirectoryName(file)?.Replace(baseDirectory, "").Trim(Path.DirectorySeparatorChar) ?? "";
-                    creatures.Add(data);
-                }
-            }
+            var creatureParser = serviceProvider.GetRequiredService<IParser<CreatureData>>();
+            List<CreatureData> creatures = creatureParser.Parse(csFiles);
 
-            CsvExporter.Export(creatures, outputCsv);
-            Console.WriteLine($"Extraction complete. {creatures.Count} creatures found. Output written to {outputCsv}");
+            var creatureExporter = serviceProvider.GetRequiredService<IExporter<CreatureData>>();
+            creatureExporter.Export(creatures, outputPath);
+            Console.WriteLine($"Extraction complete. {creatures.Count} creatures found. Output written to {outputPath}");
         }
     }
 }
